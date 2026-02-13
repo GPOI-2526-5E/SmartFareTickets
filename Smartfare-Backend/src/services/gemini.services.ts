@@ -34,6 +34,7 @@ export class GeminiService {
     throw lastError;
   }
   async searchTrainOffers(params: TrainSearchParams): Promise<TrainOffer[]> {
+
     const prompt = `Sei un assistente specializzato nella ricerca di biglietti ferroviari in Italia.
                     Ricerca biglietti treno per:
 
