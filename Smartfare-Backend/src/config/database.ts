@@ -13,7 +13,7 @@ export interface DatabaseConfig {
 
 const getDatabaseConfig = (): DatabaseConfig => {
     const mongodbUri = process.env.MONGODB_URI;
-    const mongodbDatabase = process.env.MONGODB_DATABASE || "smartfare";
+    const mongodbDatabase = process.env.MONGODB_DATABASE || "Smartfare";
 
     if (!mongodbUri) {
         throw new Error("MONGODB_URI non configurato in .env");
@@ -49,9 +49,14 @@ export async function connectDatabase(): Promise<Db> {
 
         db = client.db(config.dbName);
 
+        console.log("📦 Database selezionato", { dbName: db.databaseName });
+
         // Verifica la connessione
         await db.admin().ping();
         console.log("✅ Connessione a MongoDB Atlas riuscita!");
+
+        const collections = await db.listCollections().toArray();
+        console.log("📚 Collections disponibili", collections.map((c) => c.name));
 
         return db;
     } catch (error) {
@@ -76,7 +81,6 @@ export function getDatabase(): Db {
 export async function disconnectDatabase(): Promise<void> {
     try {
         if (db) {
-            // Nota: Per chiudere la connessione, devi avere accesso al client
             console.log("✅ Database disconnesso");
             db = null;
         }

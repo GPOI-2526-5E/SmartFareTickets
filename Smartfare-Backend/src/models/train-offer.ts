@@ -5,6 +5,8 @@ export interface TrainOffer {
     arrivalTime: string;
     duration: string;
     price: number;
+    previousPrice?: number;
+    priceTrend?: string;
     trainType: string;
     changes: number;
     availability: string;

@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { TrainSearchParams } from "../models/train-search-params"
 import { TrainOffer } from "../models/train-offer";
 import { AIRecommendation } from '../models/AI-recommendation';
+import { getCollection, getDatabase } from "../config/database";
 
 import dotenv from "dotenv";
 
@@ -34,52 +35,90 @@ export class GeminiService {
     throw lastError;
   }
   async searchTrainOffers(params: TrainSearchParams): Promise<TrainOffer[]> {
-
-    const prompt = `Sei un assistente specializzato nella ricerca di biglietti ferroviari in Italia.
-                    Ricerca biglietti treno per:
-
-                    - Partenza: ${params.from}
-                    - Arrivo: ${params.to}
-                    - Data: ${params.date}
-                    - Passeggeri: ${params.passengers || 1}
-
-                    Trova le migliori offerte da TUTTE le compagnie ferroviarie italiane:
-                    1. Trenitalia (Frecciarossa, Frecciargento, Frecciabianca, Intercity, Regionale)
-                    2. Italo (Italo, Italobus)
-                    3. Trenord (per Lombardia)
-                    4. Altri operatori regionali
-
-                    Per ogni offerta, fornisci i seguenti dettagli in formato JSON:
-                    {
-                      "company": "nome compagnia",
-                      "departureTime": "HH:MM",
-                      "arrivalTime": "HH:MM",
-                      "duration": "Xh Ymin",
-                      "price": numero (in euro),
-                      "trainType": "tipo treno (es: Frecciarossa, Italo, Regionale)",
-                      "changes": numero cambi,
-                      "availability": "disponibile/pochi posti/esaurito",
-                      "link": "URL dove acquistare (se disponibile)"
-                    }
-
-                    Restituisci un array JSON con TUTTE le offerte trovate, ordinate per orario di partenza.
-                    Includi sia opzioni economiche che premium.
-
-                    IMPORTANTE: Rispondi SOLO con un JSON array valido, senza testo aggiuntivo.`;
     try {
-      let offers: TrainOffer[] = [];
-      const response = await this.generateWithFallback(prompt);
-      const text = response.text();
-      console.log(text);
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        console.warn("Nessun JSON trovato nella risposta di Gemini");
-      } else {
-        offers = JSON.parse(jsonMatch[0]);
+      console.log("🔌 Avvio query DB Trains", {
+        from: params.from,
+        to: params.to,
+        date: params.date,
+        passengers: params.passengers || 1,
+      });
+      const trainsCollection = getCollection("Trains");
+      const { datePrefix, startDate, endDate } = this.normalizeDateInput(params.date);
+
+      console.log("🗓️ Filtro data normalizzato", {
+        datePrefix,
+        startDate: startDate?.toISOString(),
+        endDate: endDate?.toISOString(),
+      });
+
+      const originRegex = new RegExp(`^${this.escapeRegex(params.from)}$`, "i");
+      const destinationRegex = new RegExp(`^${this.escapeRegex(params.to)}$`, "i");
+
+      const filter: any = {
+        origin: originRegex,
+        destination: destinationRegex,
+      };
+
+      if (startDate && endDate && datePrefix) {
+        filter.$or = [
+          { departureTime: { $gte: startDate, $lt: endDate } },
+          { departureTime: { $regex: datePrefix } },
+        ];
+      } else if (datePrefix) {
+        filter.departureTime = { $regex: datePrefix };
       }
+
+      console.log("🔍 Filtro query Trains", filter);
+
+      const trains = await trainsCollection.find(filter).toArray();
+
+      console.log("✅ Trains trovati", { count: trains.length });
+
+      if (trains.length === 0) {
+        try {
+          const database = getDatabase();
+          const estimatedCount = await trainsCollection.estimatedDocumentCount();
+          const sampleDoc = await trainsCollection.findOne();
+
+          console.log("🧪 Trains diagnostics", {
+            dbName: database.databaseName,
+            collection: "Trains",
+            estimatedCount,
+            sampleKeys: sampleDoc ? Object.keys(sampleDoc) : [],
+            sampleDepartureTime: sampleDoc?.departureTime ?? sampleDoc?.departureDate,
+            sampleOrigin: sampleDoc?.origin ?? sampleDoc?.departure,
+            sampleDestination: sampleDoc?.destination ?? sampleDoc?.arrival,
+          });
+        } catch (diagError) {
+          console.error("❌ Errore diagnostica Trains:", diagError);
+        }
+      }
+
+      const offers: TrainOffer[] = trains.map((train: any) => {
+        const departureParts = this.extractDateTimeParts(train.departureTime || train.departureDate);
+        const arrivalParts = this.extractDateTimeParts(train.arrivalTime || train.arrivalDate);
+        const priceInfo = this.extractPriceTrend(train);
+
+        return {
+          company: train.company || "",
+          departureDate: departureParts.date || datePrefix || "",
+          departureTime: departureParts.time || "",
+          arrivalTime: arrivalParts.time || "",
+          duration: this.formatDuration(train.durationMin, train.duration),
+          price: Number(train.priceEUR ?? train.price ?? 0),
+          trainType: train.trainType || "",
+          changes: Number(train.changes ?? 0),
+          availability: this.mapAvailability(train.seatsAvailable),
+          link: train.link,
+          departure: train.origin || train.departure || "",
+          arrival: train.destination || train.arrival || "",
+          ...priceInfo,
+        };
+      });
+
       return offers;
     } catch (error) {
-      console.error("Errore ricerca con Gemini:", error);
+      console.error("Errore ricerca DB Trains:", error);
       return [];
     }
   }
@@ -116,6 +155,7 @@ Considera:
 - Numero di cambi
 - Disponibilità
 - Preferenze utente
+Se sono presenti campi come "previousPrice" o "priceTrend", indica se il prezzo e' in aumento, in discesa o stabile.
 
 IMPORTANTE: Rispondi SOLO con un JSON valido, senza testo aggiuntivo.
 `;
@@ -172,6 +212,119 @@ IMPORTANTE: Rispondi SOLO con un JSON valido, senza testo aggiuntivo.
     }
 
     return score;
+  }
+
+  private normalizeDateInput(dateInput: string): {
+    datePrefix?: string;
+    startDate?: Date;
+    endDate?: Date;
+  } {
+    if (!dateInput) {
+      return {};
+    }
+
+    const isoMatch = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const itaMatch = dateInput.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    let datePrefix: string | undefined;
+
+    if (isoMatch) {
+      datePrefix = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+    } else if (itaMatch) {
+      datePrefix = `${itaMatch[3]}-${itaMatch[2]}-${itaMatch[1]}`;
+    } else {
+      const parsed = new Date(dateInput);
+      if (!Number.isNaN(parsed.getTime())) {
+        datePrefix = parsed.toISOString().slice(0, 10);
+      }
+    }
+
+    if (!datePrefix) {
+      return {};
+    }
+
+    const startDate = new Date(`${datePrefix}T00:00:00.000Z`);
+    const endDate = new Date(`${datePrefix}T00:00:00.000Z`);
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
+
+    return { datePrefix, startDate, endDate };
+  }
+
+  private extractDateTimeParts(value: unknown): { date?: string; time?: string } {
+    if (typeof value === "string") {
+      const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+      if (match) {
+        return { date: match[1], time: match[2] };
+      }
+
+      const dateOnly = value.match(/^(\d{4}-\d{2}-\d{2})$/);
+      if (dateOnly) {
+        return { date: dateOnly[1] };
+      }
+    }
+
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return {
+        date: value.toISOString().slice(0, 10),
+        time: value.toISOString().slice(11, 16),
+      };
+    }
+
+    return {};
+  }
+
+  private formatDuration(durationMin?: number, durationText?: string): string {
+    if (typeof durationText === "string" && durationText.trim().length > 0) {
+      return durationText;
+    }
+
+    if (typeof durationMin === "number" && !Number.isNaN(durationMin)) {
+      const hours = Math.floor(durationMin / 60);
+      const minutes = durationMin % 60;
+      return `${hours}h ${minutes}min`;
+    }
+
+    return "";
+  }
+
+  private mapAvailability(seatsAvailable?: number): string {
+    if (typeof seatsAvailable !== "number") {
+      return "disponibile";
+    }
+
+    if (seatsAvailable <= 0) {
+      return "esaurito";
+    }
+
+    if (seatsAvailable <= 10) {
+      return "pochi posti";
+    }
+
+    return "disponibile";
+  }
+
+  private extractPriceTrend(train: any): { previousPrice?: number; priceTrend?: string } {
+    const currentPrice = Number(train.priceEUR ?? train.price ?? NaN);
+    const previousPrice = Number(
+      train.previousPriceEUR ?? train.previousPrice ?? train.lastPrice ?? NaN
+    );
+
+    if (Number.isNaN(currentPrice) || Number.isNaN(previousPrice)) {
+      return {};
+    }
+
+    if (currentPrice > previousPrice) {
+      return { previousPrice, priceTrend: "in aumento" };
+    }
+
+    if (currentPrice < previousPrice) {
+      return { previousPrice, priceTrend: "in discesa" };
+    }
+
+    return { previousPrice, priceTrend: "stabile" };
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 }
 
