@@ -8,9 +8,9 @@ const router = Router();
  */
 router.get("/", async (req: Request, res: Response) => {
   try {
-    const fromInput = typeof req.query.from === "string" ? req.query.from : "Torino";
-    const toInput = typeof req.query.to === "string" ? req.query.to : "Milano";
-    const dateInput = typeof req.query.date === "string" ? req.query.date : "2026-03-01";
+    const fromInput = typeof req.query.from === "string" ? req.query.from : "Udine";
+    const toInput = typeof req.query.to === "string" ? req.query.to : "Chiavari";
+    const dateInput = typeof req.query.date === "string" ? req.query.date : "2026-02-21";
 
     const { datePrefix, startDate, endDate } = normalizeDateQuery(dateInput);
     if (!datePrefix || !startDate || !endDate) {
@@ -25,14 +25,14 @@ router.get("/", async (req: Request, res: Response) => {
     const { getCollection } = await import("../config/database");
     const trainsCollection = getCollection("Trains");
     
-    const originRegex = new RegExp(`^${escapeRegex(fromInput)}$`, "i");
-    const destinationRegex = new RegExp(`^${escapeRegex(toInput)}$`, "i");
+    const departureRegex = new RegExp(`^${escapeRegex(fromInput)}$`, "i");
+    const arrivalRegex = new RegExp(`^${escapeRegex(toInput)}$`, "i");
 
     const dateRegex = new RegExp(`^${escapeRegex(datePrefix)}(?:$|T)`);
     
     const filter = {
-      origin: originRegex,
-      destination: destinationRegex,
+      departure : departureRegex,
+      arrival: arrivalRegex,
       $or: [
         { departureTime: { $gte: startDate, $lt: endDate } },
         { departureTime: { $regex: dateRegex } },
@@ -59,8 +59,8 @@ router.get("/", async (req: Request, res: Response) => {
         changes: Number(train.changes ?? 0),
         availability: mapAvailability(train.seatsAvailable),
         link: train.link,
-        departure: train.origin || train.departure || "",
-        arrival: train.destination || train.arrival || "",
+        departure: train.departure || train.departure || "",
+        arrival: train.arrival || train.arrival || "",
       };
     });
 
@@ -170,8 +170,8 @@ router.get("/db-stats", async (req: Request, res: Response) => {
     
     // Conta treni per Cesena-Brescia
     const cesenaBresciaCount = await trainsCollection.countDocuments({
-      origin: /^Cesena$/i,
-      destination: /^Brescia$/i
+      departure: /^Cesena$/i,
+      arrival: /^Brescia$/i
     });
     
     // Conta treni per il 04/03/2026
@@ -182,7 +182,7 @@ router.get("/db-stats", async (req: Request, res: Response) => {
     // Trova le tratte più comuni per il 04/03/2026
     const topRoutesForDate = await trainsCollection.aggregate([
       { $match: { departureTime: { $regex: "2026-03-04" } } },
-      { $group: { _id: { origin: "$origin", destination: "$destination" }, count: { $sum: 1 } } },
+      { $group: { _id: { departure: "$departure", arrival: "$arrival" }, count: { $sum: 1 } } },
       { $sort: { count: -1 } },
       { $limit: 10 }
     ]).toArray();
@@ -195,7 +195,7 @@ router.get("/db-stats", async (req: Request, res: Response) => {
     
     // Trova le tratte più comuni (tutte le date)
     const topRoutes = await trainsCollection.aggregate([
-      { $group: { _id: { origin: "$origin", destination: "$destination" }, count: { $sum: 1 } } },
+      { $group: { _id: { departure: "$departure", arrival: "$arrival" }, count: { $sum: 1 } } },
       { $sort: { count: -1 } },
       { $limit: 10 }
     ]).toArray();
@@ -208,18 +208,18 @@ router.get("/db-stats", async (req: Request, res: Response) => {
         cesenaBresciaCount,
         date040326Count,
         topRoutesForDate040326: topRoutesForDate.map(r => ({
-          from: r._id.origin,
-          to: r._id.destination,
+          from: r._id.departure,
+          to: r._id.arrival,
           count: r.count
         })),
         topRoutes: topRoutes.map(r => ({
-          from: r._id.origin,
-          to: r._id.destination,
+          from: r._id.departure,
+          to: r._id.arrival,
           count: r.count
         })),
         sampleTrains: sampleTrains.map(t => ({
-          origin: t.origin,
-          destination: t.destination,
+          departure: t.departure,
+          arrival: t.arrival,
           departureTime: t.departureTime,
           company: t.company,
           price: t.priceEUR
@@ -231,6 +231,53 @@ router.get("/db-stats", async (req: Request, res: Response) => {
     res.status(500).json({
       error: "Errore durante le statistiche",
       message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/health/trains - Get all trains with pagination
+ */
+router.get("/trains", async (req: Request, res: Response) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit as string) || 50);
+    const skip = (page - 1) * limit;
+
+    const { getCollection } = await import("../config/database");
+    const trainsCollection = getCollection("Trains");
+
+    const total = await trainsCollection.countDocuments();
+    const trains = await trainsCollection
+      .find({})
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    const formattedTrains = trains.map((t: any) => ({
+      departure: t.departure,
+      arrival: t.arrival,
+      departureTime: t.departureTime,
+      arrivalTime: t.arrivalTime,
+      company: t.company,
+      price: t.priceEUR || t.price,
+      trainType: t.trainType,
+      changes: t.changes,
+      seatsAvailable: t.seatsAvailable,
+    }));
+
+    res.json({
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      trains: formattedTrains,
+    });
+  } catch (error: any) {
+    console.error("Errore recupero treni:", error);
+    res.status(500).json({
+      error: "Errore durante il recupero dei treni",
+      message: error.message,
     });
   }
 });

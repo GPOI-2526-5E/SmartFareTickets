@@ -54,12 +54,12 @@ export class GeminiService {
         endDate: endDate?.toISOString(),
       });
 
-      const originRegex = new RegExp(`^${this.escapeRegex(params.from)}$`, "i");
-      const destinationRegex = new RegExp(`^${this.escapeRegex(params.to)}$`, "i");
+      const departureRegex = new RegExp(`^${this.escapeRegex(params.from)}$`, "i");
+      const arrivalRegex = new RegExp(`^${this.escapeRegex(params.to)}$`, "i");
 
       const filter: any = {
-        origin: originRegex,
-        destination: destinationRegex,
+        departure: departureRegex,
+        arrival: arrivalRegex,
       };
 
       if (startDate && endDate && dateRegex) {
@@ -93,8 +93,8 @@ export class GeminiService {
             estimatedCount,
             sampleKeys: sampleDoc ? Object.keys(sampleDoc) : [],
             sampleDepartureTime: sampleDoc?.departureTime ?? sampleDoc?.departureDate,
-            sampleOrigin: sampleDoc?.origin ?? sampleDoc?.departure,
-            sampleDestination: sampleDoc?.destination ?? sampleDoc?.arrival,
+            sampledeparture: sampleDoc?.departure ?? sampleDoc?.departure,
+            samplearrival: sampleDoc?.arrival ?? sampleDoc?.arrival,
           });
         } catch (diagError) {
           console.error("❌ Errore diagnostica Trains:", diagError);
@@ -117,8 +117,8 @@ export class GeminiService {
           changes: Number(train.changes ?? 0),
           availability: this.mapAvailability(train.seatsAvailable),
           link: train.link,
-          departure: train.origin || train.departure || "",
-          arrival: train.destination || train.arrival || "",
+          departure: train.departure || train.departure || "",
+          arrival: train.arrival || train.arrival || "",
           ...priceInfo,
         };
       });
