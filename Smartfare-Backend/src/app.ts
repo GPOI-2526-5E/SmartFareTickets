@@ -18,11 +18,6 @@ export function createApp() {
     res.sendFile(path.join(process.cwd(), "/public", "index.html"));
   });
 
-  // Route login
-  app.post("/login", (req, res, next) => {
-
-  });
-
   // API Routes
   app.use("/api/health", healthRoutes);
   app.use("/api/search", searchRoutes);

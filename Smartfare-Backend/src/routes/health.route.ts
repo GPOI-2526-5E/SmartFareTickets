@@ -1,6 +1,5 @@
 import { Router, Request, Response } from "express";
 import { geminiService } from "../services/gemini.services";
-import { TrainSearchParams } from "../models/train-search-params";
 
 const router = Router();
 
@@ -9,30 +8,40 @@ const router = Router();
  */
 router.get("/", async (req: Request, res: Response) => {
   try {
-    // Cerca treni dal 1° al 30 marzo 2026
-    console.log(`🔍 Ricerca nuova: Cesena → Brescia (01/03/2026 - 30/03/2026)`);
+    const fromInput = typeof req.query.from === "string" ? req.query.from : "Torino";
+    const toInput = typeof req.query.to === "string" ? req.query.to : "Milano";
+    const dateInput = typeof req.query.date === "string" ? req.query.date : "2026-03-01";
+
+    const { datePrefix, startDate, endDate } = normalizeDateQuery(dateInput);
+    if (!datePrefix || !startDate || !endDate) {
+      return res.status(400).json({
+        error: "Data non valida",
+        expected: "YYYY-MM-DD oppure DD/MM/YYYY",
+      });
+    }
+
+    console.log(`🔍 Ricerca nuova: ${fromInput} → ${toInput} (${datePrefix})`);
     
     const { getCollection } = await import("../config/database");
     const trainsCollection = getCollection("Trains");
     
-    const originRegex = /^Cesena$/i;
-    const destinationRegex = /^Brescia$/i;
-    
-    // Range di date: dal 01/03/2026 al 30/03/2026
-    const startDate = new Date("2026-03-01T00:00:00.000Z");
-    const endDate = new Date("2026-03-31T00:00:00.000Z");
+    const originRegex = new RegExp(`^${escapeRegex(fromInput)}$`, "i");
+    const destinationRegex = new RegExp(`^${escapeRegex(toInput)}$`, "i");
+
+    const dateRegex = new RegExp(`^${escapeRegex(datePrefix)}(?:$|T)`);
     
     const filter = {
       origin: originRegex,
       destination: destinationRegex,
       $or: [
         { departureTime: { $gte: startDate, $lt: endDate } },
-        { departureTime: { $regex: "2026-03-" } }
+        { departureTime: { $regex: dateRegex } },
+        { departureDate: { $regex: dateRegex } },
       ]
     };
     
     const trains = await trainsCollection.find(filter).toArray();
-    console.log(`✅ Treni trovati per marzo 2026: ${trains.length}`);
+    console.log(`✅ Treni trovati per ${datePrefix}: ${trains.length}`);
     
     // Converti i risultati in TrainOffer
     const offers = trains.map((train: any) => {
@@ -74,6 +83,36 @@ router.get("/", async (req: Request, res: Response) => {
 });
 
 // Helper functions
+function normalizeDateQuery(dateInput: string): {
+  datePrefix?: string;
+  startDate?: Date;
+  endDate?: Date;
+} {
+  const isoMatch = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const itaMatch = dateInput.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  let datePrefix: string | undefined;
+
+  if (isoMatch) {
+    datePrefix = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  } else if (itaMatch) {
+    datePrefix = `${itaMatch[3]}-${itaMatch[2]}-${itaMatch[1]}`;
+  }
+
+  if (!datePrefix || !/^\d{4}-\d{2}-\d{2}$/.test(datePrefix)) {
+    return {};
+  }
+
+  const startDate = new Date(`${datePrefix}T00:00:00.000Z`);
+  const endDate = new Date(`${datePrefix}T00:00:00.000Z`);
+  endDate.setUTCDate(endDate.getUTCDate() + 1);
+
+  return { datePrefix, startDate, endDate };
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function extractDateTimeParts(value: unknown): { date?: string; time?: string } {
   if (typeof value === "string") {
     const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);

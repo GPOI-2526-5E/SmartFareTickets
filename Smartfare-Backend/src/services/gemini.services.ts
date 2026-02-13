@@ -10,7 +10,7 @@ dotenv.config();
 
 const API_KEY = process.env.GEMINI_API_KEY || "";
 const genAI = new GoogleGenerativeAI(API_KEY);
-const GEMINI_MODELS = (process.env.GEMINI_MODEL || "gemini-2.5-flash,gemini-2.5-flash-lite")
+const GEMINI_MODELS = (process.env.GEMINI_MODEL || "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro,gemini-2-flash")
   .split(",")
   .map((m) => m.trim())
   .filter((m) => m.startsWith("gemini-"));
@@ -44,6 +44,9 @@ export class GeminiService {
       });
       const trainsCollection = getCollection("Trains");
       const { datePrefix, startDate, endDate } = this.normalizeDateInput(params.date);
+      const dateRegex = datePrefix
+        ? new RegExp(`^${this.escapeRegex(datePrefix)}(?:$|T)`)
+        : undefined;
 
       console.log("🗓️ Filtro data normalizzato", {
         datePrefix,
@@ -59,13 +62,17 @@ export class GeminiService {
         destination: destinationRegex,
       };
 
-      if (startDate && endDate && datePrefix) {
+      if (startDate && endDate && dateRegex) {
         filter.$or = [
           { departureTime: { $gte: startDate, $lt: endDate } },
-          { departureTime: { $regex: datePrefix } },
+          { departureTime: { $regex: dateRegex } },
+          { departureDate: { $regex: dateRegex } },
         ];
-      } else if (datePrefix) {
-        filter.departureTime = { $regex: datePrefix };
+      } else if (dateRegex) {
+        filter.$or = [
+          { departureTime: { $regex: dateRegex } },
+          { departureDate: { $regex: dateRegex } },
+        ];
       }
 
       console.log("🔍 Filtro query Trains", filter);
@@ -239,6 +246,10 @@ IMPORTANTE: Rispondi SOLO con un JSON valido, senza testo aggiuntivo.
     }
 
     if (!datePrefix) {
+      return {};
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datePrefix)) {
       return {};
     }
 
