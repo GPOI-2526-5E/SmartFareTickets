@@ -58,8 +58,7 @@ export const SEO_PAGES: Record<string, SeoPageConfig> = {
     title: 'SmartFare: pianifica viaggi in Italia | Sito ufficiale',
     description:
       'Crea itinerari su misura, esplora destinazioni, usa l\'AI Planner e la mappa interattiva. SmartFare è la piattaforma italiana per viaggiare in modo intelligente.',
-    keywords:
-      'SmartFare, pianificare viaggio, itinerari Italia, AI travel planner, mappa viaggi, creare itinerario',
+    keywords: `SmartFare, Smart Fare, SmartFare app, pianificatore viaggi, planner viaggi, itinerari Italia, itinerario su misura, creare itinerario, progettare viaggio, viaggi in Italia, cosa vedere in Italia, weekend in Italia, city break Italia, itinerari gastronomici Italia, itinerari natura, itinerari culturali, tour enogastronomici, mappa interattiva viaggi, mappe turistiche, punti di interesse Italia, luoghi da visitare, itinerari personalizzati, AI travel planner, travel planner Italy, personalized itineraries, Italy travel planner, trip planner Italy, travel itinerary generator, travel planning app, save itineraries, community itineraries, travel inspiration Italy, best places in Italy, things to do in Italy, Italian travel guide, off the beaten path Italy, sustainable travel Italy, slow travel Italy, road trip Italy, weekend getaway Italy, family trips Italy, couples trips Italy, solo travel Italy, SmartFare itineraries, SmartFare planner, itinerari su misura Italia, pianificazione viaggio intelligente, mappe per turisti, guide locali, itinerari consigliati, travel recommendations Italy, local experiences Italy, discover Italy, explore Italy, tours Italy, attractions Italy, museums Italy, beaches Italy, hiking Italy, cycling routes Italy, cultural routes Italy, heritage sites Italy, UNESCO sites Italy, hidden gems Italy`,
     path: '/',
     ogType: 'website',
     navLabel: 'Home'

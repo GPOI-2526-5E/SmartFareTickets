@@ -76,12 +76,12 @@ export class HomeSectionComponent implements OnInit, AfterViewInit, OnDestroy {
     'https://res.cloudinary.com/dxudggkln/video/upload/f_auto,q_auto/v1778223688/background-6_zuz2zt.mp4',
   ];
 
-  protected readonly videoLayers = [
+  protected readonly videoLayers = signal<string[]>([
     this.videoSources[0],
     this.videoSources[1] ?? this.videoSources[0],
-  ];
+  ]);
 
-  protected activeVideoLayer = 0;
+  protected readonly activeVideoLayer = signal(0);
   protected readonly isInitialVideoReady = signal(false);
 
   private currentVideoIndex = 0;
@@ -146,15 +146,14 @@ export class HomeSectionComponent implements OnInit, AfterViewInit, OnDestroy {
   ngAfterViewInit(): void {
     queueMicrotask(() => {
       this.prepareVideoElements();
-      this.playLayer(this.activeVideoLayer);
+      this.playLayer(this.activeVideoLayer());
       this.isHeroTypingReady = true;
       this.initializeHeroTyping();
       this.isHeroContentVisible.set(true);
     });
 
-    if (!this.reduceMotion) {
-      this.scheduleNextTransition();
-    }
+    // scheduleNextTransition() viene avviato da onVideoLoaded() solo dopo
+    // che il primo video è confermato in play — non qui.
 
     if (typeof IntersectionObserver !== 'undefined') {
       this.ngZone.runOutsideAngular(() => {
@@ -165,8 +164,10 @@ export class HomeSectionComponent implements OnInit, AfterViewInit, OnDestroy {
             if (!this.isHeroVisible) {
               this.pauseAllVideos();
             } else {
-              this.playLayer(this.activeVideoLayer);
-              this.scheduleNextTransition();
+              this.ngZone.run(() => {
+                this.playLayer(this.activeVideoLayer());
+                this.scheduleNextTransition();
+              });
             }
           }
         }, { threshold: 0 });
@@ -190,44 +191,53 @@ export class HomeSectionComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   protected onVideoLoaded(layerIndex: number): void {
-    const video = this.getVideoElement(layerIndex);
-    if (!video) {
-      return;
-    }
-
-    video.currentTime = 0;
-
-    if (layerIndex === this.activeVideoLayer) {
-      this.playVideo(video).then(() => {
-        this.isInitialVideoReady.set(true);
-        this.cdr.markForCheck();
-      });
-      return;
-    }
-
-    if (layerIndex !== this.getHiddenLayerIndex()) {
-      return;
-    }
-
-    this.playVideo(video).then(() => {
-      this.activeVideoLayer = layerIndex;
-      this.currentVideoIndex = this.queuedVideoIndex;
-
-      if (this.cleanupTimeoutId) {
-        clearTimeout(this.cleanupTimeoutId);
+    // Questo handler viene chiamato da un evento DOM: assicuriamoci di
+    // rientrare nella zone di Angular per far scattare il change detection.
+    this.ngZone.run(() => {
+      const video = this.getVideoElement(layerIndex);
+      if (!video) {
+        return;
       }
 
-      this.cleanupTimeoutId = setTimeout(() => {
-        const previousLayer = this.getHiddenLayerIndex();
-        const previousVideo = this.getVideoElement(previousLayer);
+      video.currentTime = 0;
 
-        if (previousVideo) {
-          previousVideo.pause();
-          previousVideo.currentTime = 0;
+      if (layerIndex === this.activeVideoLayer()) {
+        // Primo video pronto: avvia play e schedula la prima rotazione
+        this.playVideo(video).then(() => {
+          this.isInitialVideoReady.set(true);
+          this.cdr.markForCheck();
+          if (!this.reduceMotion) {
+            this.scheduleNextTransition();
+          }
+        });
+        return;
+      }
+
+      if (layerIndex !== this.getHiddenLayerIndex()) {
+        return;
+      }
+
+      // Video successivo pronto: fai il crossfade
+      this.playVideo(video).then(() => {
+        const previousLayer = this.activeVideoLayer();
+        this.activeVideoLayer.set(layerIndex);
+        this.currentVideoIndex = this.queuedVideoIndex;
+        this.cdr.markForCheck();
+
+        if (this.cleanupTimeoutId) {
+          clearTimeout(this.cleanupTimeoutId);
         }
-      }, this.transitionMs);
 
-      this.scheduleNextTransition();
+        this.cleanupTimeoutId = setTimeout(() => {
+          const previousVideo = this.getVideoElement(previousLayer);
+          if (previousVideo) {
+            previousVideo.pause();
+            previousVideo.currentTime = 0;
+          }
+        }, this.transitionMs);
+
+        this.scheduleNextTransition();
+      });
     });
   }
 
@@ -254,7 +264,11 @@ export class HomeSectionComponent implements OnInit, AfterViewInit, OnDestroy {
     const nextVideoIndex = (this.currentVideoIndex + 1) % this.videoSources.length;
 
     this.queuedVideoIndex = nextVideoIndex;
-    this.videoLayers[hiddenLayer] = this.videoSources[nextVideoIndex];
+
+    const updatedLayers = [...this.videoLayers()];
+    updatedLayers[hiddenLayer] = this.videoSources[nextVideoIndex];
+    this.videoLayers.set(updatedLayers);
+    this.cdr.markForCheck();
 
     queueMicrotask(() => {
       const hiddenVideo = this.getVideoElement(hiddenLayer);
@@ -284,7 +298,7 @@ export class HomeSectionComponent implements OnInit, AfterViewInit, OnDestroy {
       video.setAttribute('playsinline', '');
       video.setAttribute('webkit-playsinline', 'true');
 
-      if (index === this.activeVideoLayer) {
+      if (index === this.activeVideoLayer()) {
         video.load();
         return;
       }
@@ -298,7 +312,7 @@ export class HomeSectionComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private getHiddenLayerIndex(): number {
-    return this.activeVideoLayer === 0 ? 1 : 0;
+    return this.activeVideoLayer() === 0 ? 1 : 0;
   }
 
   private async playVideo(video: HTMLVideoElement): Promise<void> {

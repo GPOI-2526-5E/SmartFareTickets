@@ -3,11 +3,11 @@
   <app-loader [show]="!isInitialVideoReady()"></app-loader>
 
   <div class="background-layer w-100 h-100 position-absolute top-0 start-0" [class.is-ready]="isInitialVideoReady()">
-    @for (videoSrc of videoLayers; track $index) {
-    <video #backgroundVideo class="background-video" [class.is-active]="$index === activeVideoLayer"
-      [attr.src]="videoSrc" [attr.autoplay]="$index === activeVideoLayer ? '' : null" muted
-      [attr.loop]="$index === activeVideoLayer ? '' : null"
-      [attr.preload]="$index === activeVideoLayer ? 'auto' : 'metadata'"
+    @for (videoSrc of videoLayers(); track $index) {
+    <video #backgroundVideo class="background-video" [class.is-active]="$index === activeVideoLayer()"
+      [attr.src]="videoSrc" [attr.autoplay]="$index === activeVideoLayer() ? '' : null" muted
+      [attr.loop]="$index === activeVideoLayer() ? '' : null"
+      [attr.preload]="$index === activeVideoLayer() ? 'auto' : 'metadata'"
       (loadedmetadata)="onVideoLoaded($index)"></video>
     }
     <div class="overlay w-100 h-100 position-absolute top-0 start-0"></div>
